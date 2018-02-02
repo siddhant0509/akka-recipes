@@ -1,4 +1,4 @@
-package com.swiggy.projectR.recipes
+package com.no_side_effects.akka_recipes
 
 import akka.actor.{Actor, Cancellable, Stash}
 import com.no_side_effects.akka_recipes.API.Timeout

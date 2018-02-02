@@ -1,4 +1,4 @@
-package com.swiggy.projectR.recipes
+package com.no_side_effects.akka_recipes
 
 import java.util.UUID
 import java.util.concurrent.TimeoutException
