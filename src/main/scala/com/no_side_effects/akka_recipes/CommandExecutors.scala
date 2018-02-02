@@ -3,18 +3,15 @@ package com.swiggy.projectR.recipes
 import java.util.UUID
 import java.util.concurrent.TimeoutException
 
-import akka.actor.AbstractActor.ActorContext
 import akka.actor.{Actor, ActorLogging, ActorRef, Props, Terminated}
-import akka.util.Timeout
-import com.swiggy.projectR.API
-import com.swiggy.projectR.API.Initialize
+import com.no_side_effects.akka_recipes.API.{Initialize, Timeout}
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.FiniteDuration
 
 /**
   * Created by siddhant.srivastava on 1/31/18.
   */
-
 object CommandExecutors{
 
   type CommandExecutionRequest[A] = (String, A)
@@ -36,10 +33,9 @@ object CommandExecutors{
     Props(CommandExecutor(action, successAction, failedAction))
 
 
-  case class CommandExecutors[A](actions: CommandActions[A], successAction: SuccessAction[A], failedAction: FailedAction[A])(implicit duration: FiniteDuration) extends Actor with ActorLogging{
+  case class CommandExecutors[A](actions: CommandActions[A], successAction: SuccessAction[A], failedAction: FailedAction[A])(implicit duration: FiniteDuration, executionContext: ExecutionContext) extends Actor with ActorLogging{
 
-    import concurrent.ExecutionContext.Implicits.global
-    val timer = context.system.scheduler.scheduleOnce(duration, self, API.Timeout)
+    val timer = context.system.scheduler.scheduleOnce(duration, self, Timeout)
 
     @scala.throws[Exception](classOf[Exception])
     override def preStart(): Unit = {
@@ -108,10 +104,9 @@ object CommandExecutors{
 
 
 
-  case class CommandExecutor[A](action: CommandAction[A], successAction: SuccessAction[A], failedAction: FailedAction[A])(implicit duration: FiniteDuration) extends Actor with ActorLogging{
-    import concurrent.ExecutionContext.Implicits.global
+  case class CommandExecutor[A](action: CommandAction[A], successAction: SuccessAction[A], failedAction: FailedAction[A])(implicit duration: FiniteDuration, executionContext: ExecutionContext) extends Actor with ActorLogging{
 
-    val timer = context.system.scheduler.scheduleOnce(duration, self, API.Timeout)
+    val timer = context.system.scheduler.scheduleOnce(duration, self, Timeout)
 
     @scala.throws[Exception](classOf[Exception])
     override def preStart(): Unit = {
@@ -121,7 +116,7 @@ object CommandExecutors{
     }
 
     override def receive: Receive = {
-      case API.Timeout =>
+      case Timeout =>
         log.error("Command Execution timeout")
         context.parent ! FailedCommandExecution(action._2, new TimeoutException("Timeout while executing command"))
       case x => failedAction.orElse(successAction).apply((action._2, x)) match {
