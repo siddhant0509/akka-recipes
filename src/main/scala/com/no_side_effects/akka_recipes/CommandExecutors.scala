@@ -37,6 +37,8 @@ object CommandExecutors{
 
     val timer = context.system.scheduler.scheduleOnce(duration, self, Timeout)
 
+    val (forwardActor, requests) = actions
+
     @scala.throws[Exception](classOf[Exception])
     override def preStart(): Unit = {
       log.debug("Starting Commands Executor  with path {}", self.path)
@@ -47,14 +49,14 @@ object CommandExecutors{
 
     override def receive: Receive = {
       case Initialize =>
-        val requestExecutorActors = List.range(0, actions._2.size)
+        val requestExecutorActors = List.range(0, requests.size)
           .map(_ => UUID.randomUUID().toString)
-          .zip(actions._2)
-          .map(t => (t._1, t._2, createCommandExecutor(t._2, t._1)))
-        requestExecutorActors.foreach(t => context.watch(t._3))
+          .zip(requests)
+          .map{case (id, request) => (id, request, createCommandExecutor(request, id))}
+        requestExecutorActors.foreach{case(_,_, actor) => context.watch(actor)}
         context.become(receiveResult(
-          requestExecutorActors.map(t => (t._1, t._2)).toMap,
-          requestExecutorActors.map(t => (t._3, t._1)).toMap,
+          requestExecutorActors.map{case (id, req, _) => (id, req)}.toMap,
+          requestExecutorActors.map{case (id, _, actor) => (actor, id)}.toMap,
           List()
         ))
     }
@@ -73,20 +75,21 @@ object CommandExecutors{
     }
 
     def onModelDeploymentStatus(s: CommandExecutionResult[A], outBoundRequest: Map[String, A], actors: Map[ActorRef, String], result: Seq[CommandExecutionResult[A]]): Unit = {
-      outBoundRequest.get(s.req._1).foreach(deployRequest => {
+      val (id, _) = s.req
+      outBoundRequest.get(id).foreach(deployRequest => {
         if(outBoundRequest.size - 1 == 0) {
           context.parent ! (result ++ Seq(s))
           context.stop(self)
         }
         else
-          context.become(receiveResult(outBoundRequest - s.req._1, actors, result ++ Seq(s)))
+          context.become(receiveResult(outBoundRequest - id, actors, result ++ Seq(s)))
       })
     }
 
 
     def createCommandExecutor(req: A, id: String): ActorRef = {
       context.actorOf(props(
-        (actions._1, (id, req)),
+        (forwardActor, (id, req)),
         successAction,
         failedAction
       ), "command-executor-" + id)
@@ -108,26 +111,28 @@ object CommandExecutors{
 
     val timer = context.system.scheduler.scheduleOnce(duration, self, Timeout)
 
+    val (forwardActor, idr @ (id, request)) = action
+
     @scala.throws[Exception](classOf[Exception])
     override def preStart(): Unit = {
       log.debug("Command Executor Started on path {}", self.path)
-      log.info("Sending request {}", action._2._2)
-      action._1 ! action._2._2
+      log.info("Sending request {}", action)
+      forwardActor ! request
     }
 
     override def receive: Receive = {
       case Timeout =>
         log.error("Command Execution timeout")
-        context.parent ! FailedCommandExecution(action._2, new TimeoutException("Timeout while executing command"))
-      case x => failedAction.orElse(successAction).apply((action._2, x)) match {
-        case None => context.parent ! SuccessfulCommandExecution(action._2)
+        context.parent ! FailedCommandExecution(idr, new TimeoutException("Timeout while executing command"))
+      case x => failedAction.orElse(successAction).apply((idr, x)) match {
+        case None => context.parent ! SuccessfulCommandExecution(idr)
         case Some(succ) => context.parent ! succ
       }
     }
 
     @scala.throws[Exception](classOf[Exception])
     override def postStop(): Unit = {
-      log.debug("Command Executor for req {} stopped", action._2)
+      log.debug("Command Executor for req {} stopped", (id, request))
       timer.cancel()
       super.postStop()
     }
